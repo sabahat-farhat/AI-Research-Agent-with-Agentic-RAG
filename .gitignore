@@ -1,0 +1,36 @@
+# Environment variables — never commit secrets
+.env
+.env.local
+.env.*.local
+
+# Python virtual environments
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# ChromaDB data — local only, can be large
+chroma_db/
+
+# Uploaded documents
+data/uploads/
+
+# Node modules
+node_modules/
+
+# Vite build output
+dist/
+build/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor config
+.vscode/
+.idea/
+*.swp

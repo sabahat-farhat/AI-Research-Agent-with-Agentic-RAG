@@ -55,12 +55,16 @@ def arxiv_search(query: str, max_results: int = 5) -> str:
 
 # ─── Tool 2: Web Search ───────────────────────────────────────────────────────
 
-# TavilySearchResults is a pre-built LangChain tool — we just configure it.
-# It returns a list of {url, content} dicts; we format them as readable text.
-_tavily = TavilySearchResults(
-    max_results=4,
-    tavily_api_key=settings.tavily_api_key,
-)
+_tavily = None
+
+def _get_tavily():
+    global _tavily
+    if _tavily is None:
+        _tavily = TavilySearchResults(
+            max_results=4,
+            tavily_api_key=settings.tavily_api_key,
+        )
+    return _tavily
 
 @tool
 def web_search(query: str) -> str:
@@ -69,7 +73,7 @@ def web_search(query: str) -> str:
     information about a topic. Use this for current events, recent developments,
     or when you need real-world examples and implementations rather than academic papers.
     """
-    raw = _tavily.invoke(query)
+    raw = _get_tavily().invoke(query)
     if not raw:
         return "No web results found."
     parts = []

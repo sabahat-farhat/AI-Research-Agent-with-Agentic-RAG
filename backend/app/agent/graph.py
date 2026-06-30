@@ -9,6 +9,7 @@ The ReAct loop we build here:
   agent_node → (has tool calls?) → tool_node → agent_node → ... → END
 """
 from langchain_groq import ChatGroq
+from langchain_core.messages import SystemMessage, AIMessage
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 
@@ -16,61 +17,75 @@ from app.agent.state import AgentState
 from app.agent.tools import TOOLS
 from app.core.config import settings
 
+SYSTEM_PROMPT = """You are a research assistant with access to three tools:
+- arxiv_search: search academic papers on arXiv
+- web_search: search the live web for recent articles and news
+- document_store_search: search documents the user has uploaded locally
+
+For each user question:
+1. Decide which tool(s) would best answer it
+2. Call the tool with a clear, specific query
+3. After receiving results, decide if you need another tool or have enough to answer
+4. When you have enough information, give a thorough final answer
+
+Always call at least one tool before answering. Never make up information — base your answer only on tool results."""
+
 
 def build_agent_graph():
-    # LLM with tools bound — this tells the LLM what tools exist and their schemas.
-    # "bind_tools" adds the tool definitions to every request so the LLM can choose to call them.
     llm = ChatGroq(
-        model="llama-3.3-70b-versatile",  # bigger model = better tool-use reasoning
+        model="llama-3.3-70b-versatile",
         temperature=0,
         api_key=settings.groq_api_key,
     )
     llm_with_tools = llm.bind_tools(TOOLS)
 
-    # ─── Node 1: Agent ────────────────────────────────────────────────────────
-    # This node runs the LLM. The LLM sees all messages so far and either:
-    #   (a) calls a tool  → adds an AIMessage with tool_calls
-    #   (b) gives a final answer → adds an AIMessage with content
-    def agent_node(state: AgentState):
-        response = llm_with_tools.invoke(state["messages"])
-        return {"messages": [response]}
+    # Fallback LLM without tools — used if the model fails to generate a valid tool call
+    llm_plain = ChatGroq(
+        model="llama-3.3-70b-versatile",
+        temperature=0,
+        api_key=settings.groq_api_key,
+    )
 
-    # ─── Node 2: Tools ────────────────────────────────────────────────────────
-    # ToolNode is a prebuilt LangGraph node. It:
-    #   1. Reads tool_calls from the last AIMessage
-    #   2. Executes the matching Python function from TOOLS
-    #   3. Wraps the result in a ToolMessage and appends it to messages
+    def agent_node(state: AgentState):
+        # Prepend the system prompt if this is the first turn
+        messages = state["messages"]
+        if not any(isinstance(m, SystemMessage) for m in messages):
+            messages = [SystemMessage(content=SYSTEM_PROMPT)] + messages
+
+        try:
+            response = llm_with_tools.invoke(messages)
+            # Groq sometimes returns an AIMessage with empty content AND no tool calls
+            # when it fails to form a valid tool call — treat that as a plain answer
+            has_tool_calls = hasattr(response, "tool_calls") and bool(response.tool_calls)
+            has_content = bool(response.content and response.content.strip())
+            if not has_tool_calls and not has_content:
+                raise ValueError("Empty response from model")
+            return {"messages": [response]}
+        except Exception:
+            # If tool-call generation fails, fall back to a direct answer
+            fallback = llm_plain.invoke(messages)
+            return {"messages": [AIMessage(content=fallback.content)]}
+
     tool_node = ToolNode(TOOLS)
 
-    # ─── Conditional edge: should we loop or stop? ────────────────────────────
     def should_continue(state: AgentState) -> str:
         last_message = state["messages"][-1]
-        # If the LLM's last message contains tool calls → run those tools
         if hasattr(last_message, "tool_calls") and last_message.tool_calls:
             return "call_tools"
-        # Otherwise the LLM gave a final text answer → stop
         return "end"
 
-    # ─── Build the graph ──────────────────────────────────────────────────────
     graph = StateGraph(AgentState)
-
     graph.add_node("agent", agent_node)
     graph.add_node("tools", tool_node)
-
     graph.set_entry_point("agent")
-
-    # After agent runs, decide: loop to tools, or end
     graph.add_conditional_edges(
         "agent",
         should_continue,
         {"call_tools": "tools", "end": END},
     )
-
-    # After tools run, always go back to agent (it decides what to do next)
     graph.add_edge("tools", "agent")
 
     return graph.compile()
 
 
-# Compile once at import time — the compiled graph is thread-safe and reusable
 agent_graph = build_agent_graph()
