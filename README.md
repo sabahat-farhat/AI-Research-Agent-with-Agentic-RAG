@@ -1,6 +1,6 @@
 # Research Agent — Agentic RAG with Real-Time Streaming
 
-A multi-tool AI research agent that autonomously decides how to answer a question — searching arXiv papers, the live web, or a local document store — while streaming its reasoning process to a React frontend in real time.
+A multi-tool AI research agent that autonomously decides how to answer a question, searching arXiv papers, the live web, or a local document store while streaming its reasoning process to a React frontend in real time.
 
 ---
 
@@ -82,7 +82,6 @@ User: "What are the latest advances in RAG systems?"
 - Node.js 18+
 - A **Groq** API key — free at [console.groq.com](https://console.groq.com)
 - A **Tavily** API key — free tier at [tavily.com](https://tavily.com) (1000 searches/month)
-- Project 1 (`01-rag-evaluation-system`) built and populated with at least one document (optional — the agent works without it, but the document store tool will return no results)
 
 ---
 
@@ -164,55 +163,6 @@ Each tool is a plain Python function decorated with `@tool`. The decorator extra
 | `web_search` | Tavily API | Current news, tutorials, practical guides |
 | `document_store_search` | ChromaDB (local) | Questions about your own uploaded documents |
 
-### SSE Streaming
-
-The `/research` endpoint returns a `StreamingResponse` with `Content-Type: text/event-stream`. As LangGraph executes each graph node, `astream_events()` fires events that are immediately forwarded to the browser:
-
-```
-data: {"type": "thinking", "content": "I'll search arXiv first"}\n\n
-data: {"type": "tool_call", "tool": "arxiv_search", "args": {"query": "..."}}\n\n
-data: {"type": "tool_result", "tool": "arxiv_search", "content": "..."}\n\n
-data: {"type": "final_answer", "content": "..."}\n\n
-data: {"type": "done"}\n\n
-```
-
-The React frontend reads this stream using `fetch()` and a `ReadableStream` reader, updating state on each parsed event so the UI re-renders incrementally.
-
----
-
-## API Reference
-
-### `POST /research`
-
-Runs the agent and streams events via SSE.
-
-**Request body:**
-```json
-{ "question": "What are the latest advances in RAG systems?" }
-```
-
-**Response:** `text/event-stream` — a sequence of JSON events (see above).
-
-### `GET /health`
-
-```json
-{ "status": "ok" }
-```
-
----
-
-## Connection to Project 1
-
-This project extends the RAG system from Project 1 rather than replacing it:
-
-| Feature | Project 1 | Project 3 |
-|---|---|---|
-| ChromaDB | Stores uploaded documents | Agent queries it as one of 3 tools |
-| LLM | Direct call — one response | Agent controller — decides what to do next |
-| FastAPI | REST endpoint | SSE streaming endpoint |
-| React UI | Query + results display | Live streaming thought process |
-
-The `chroma_persist_dir` in `config.py` points at Project 1's existing database — no re-uploading required.
 
 ---
 
